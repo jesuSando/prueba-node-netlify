@@ -382,7 +382,14 @@ async function handlePayment() {
                 return;
             }
 
-            // Mostrar estado de carga
+            const urlReturn = `${urlBase}/return.html`;
+            const urlConfirmation = `${urlBase}/.netlify/functions/flowCallback`;
+
+            console.log("[DEBUG] Monto:", amount);
+            console.log("[DEBUG] Order ID:", orderId);
+            console.log("[DEBUG] urlReturn:", urlReturn);
+            console.log("[DEBUG] urlConfirmation:", urlConfirmation);
+
             $modal.find('.modal-body').html('<div class="loading-payment">Preparando pago...</div>');
 
             const res = await fetch('/.netlify/functions/crearPago', {
@@ -391,19 +398,21 @@ async function handlePayment() {
                 body: JSON.stringify({
                     amount,
                     orderId,
-                    urlReturn: `${urlBase}/return.html`,
-                    urlConfirmation: `${urlBase}/.netlify/functions/flowCallback`
+                    urlReturn,
+                    urlConfirmation
                 })
             });
 
             const data = await res.json();
 
+            console.log("[DEBUG] Respuesta de crearPago:", data);
+
             if (data.url) {
-                // Abrir en nueva pestaña en lugar de iframe
+                console.log("[DEBUG] URL de pago:", data.url);
                 const paymentWindow = window.open(data.url, '_blank', 'width=800,height=600');
 
                 if (!paymentWindow) {
-                    alert("El navegador bloqueó la ventana emergente. Por favor permite ventanas emergentes para este sitio.");
+                    alert("El navegador bloqueó la ventana emergente. Por favor permite ventanas emergentes.");
                     $modal.find('.modal-body').html(`
                         <div class="payment-error">
                             <p>El navegador bloqueó la ventana de pago. Por favor permite ventanas emergentes.</p>
@@ -416,12 +425,15 @@ async function handlePayment() {
 
                 // Escuchar mensajes desde return.html
                 const handlePagoMensaje = async (event) => {
+                    console.log("[DEBUG] Mensaje recibido desde return.html:", event.data);
+
                     if (!event.data || event.data.tipo !== 'pagoCompletado') return;
 
                     const token = event.data.token || localStorage.getItem('lastToken');
+                    console.log("[DEBUG] Token recibido para verificación:", token);
+
                     window.removeEventListener('message', handlePagoMensaje);
 
-                    // Verificar estado del pago
                     const checkRes = await fetch('/.netlify/functions/consultarPago', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -429,6 +441,7 @@ async function handlePayment() {
                     });
 
                     const checkData = await checkRes.json();
+                    console.log("[DEBUG] Respuesta de consultarPago:", checkData);
 
                     if (checkData.status === 1) {
                         showPaymentResult($modal, true);
@@ -451,7 +464,7 @@ async function handlePayment() {
                                 });
                                 $(`.seat[data-seat="${seat.seat}"]`).removeClass('selected').addClass('available');
                             } catch {
-                                console.error(`Error al liberar asiento ${seat.seat}`);
+                                console.error(`[ERROR] Error al liberar asiento ${seat.seat}`);
                             }
                         }
 
@@ -474,16 +487,10 @@ async function handlePayment() {
                 window.addEventListener('message', handlePagoMensaje);
             } else {
                 alert("Error al iniciar pago con Flow");
-                console.error(data);
-                $modal.find('.modal-body').html(`
-                    <div class="payment-error">
-                        <p>Error al conectar con el sistema de pagos</p>
-                        <button class="btn btn-secondary btn-close-modal">Volver</button>
-                    </div>
-                `);
+                console.error("[ERROR] Respuesta sin URL de pago:", data);
             }
         } catch (error) {
-            console.error("Error en pago web:", error);
+            console.error("[ERROR] Excepción en handlePayment (web):", error);
             $modal.find('.modal-body').html(`
                 <div class="payment-error">
                     <p>Error al procesar el pago</p>
@@ -492,6 +499,7 @@ async function handlePayment() {
             `);
         }
     }
+
 
     if (method === 'cash') {
         // Lógica para pago en efectivo u otro método
