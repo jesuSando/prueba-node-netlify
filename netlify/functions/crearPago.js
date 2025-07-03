@@ -42,7 +42,7 @@ export async function handler(event) {
       commerceOrder: orderId,
       amount: amount.toString(),
       currency: "CLP",
-      urlReturn: `${urlBase}/return.html`,
+      urlReturn: `https://www.youtube.com`,
       urlConfirmation: `${urlBase}/.netlify/functions/flowCallback`,
       subject: "Compra de pasajes",
       email: "dgonzalez@wit.la",
