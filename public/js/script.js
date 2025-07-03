@@ -8,7 +8,7 @@ let currentServiceId = '';
 let selectedSeats = [];
 let currentServiceData = null;
 
-let urlBase = window.location.origin; // esto lo resuelve automáticamente
+let urlBase = "https://prueba-flow.netlify.app"
 
 
 async function obtenerToken() {

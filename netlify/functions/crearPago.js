@@ -35,7 +35,7 @@ export async function handler(event) {
     }
 
 
-    const urlBase = process.env.URL_BASE || "https://bus-boleteria.netlify.app";
+    const urlBase = process.env.URL_BASE || "https://prueba-flow.netlify.app";
 
     const params = {
       apiKey: API_KEY,
