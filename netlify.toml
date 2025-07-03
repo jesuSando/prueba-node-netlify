@@ -5,10 +5,9 @@
 
 [[redirects]]
   from = "/return.html"
-  to = "/return.html"
+  to = "/.netlify/functions/serveReturn"
   status = 200
   method = "POST"
-  force = true
 
 
 [[redirects]]
