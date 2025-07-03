@@ -42,7 +42,7 @@ export async function handler(event) {
       commerceOrder: orderId,
       amount: amount.toString(),
       currency: "CLP",
-      urlReturn: `https://www.youtube.com`,
+      urlReturn: `https://novias-de-azucar1.netlify.app/`,
       urlConfirmation: `${urlBase}/.netlify/functions/flowCallback`,
       subject: "Compra de pasajes",
       email: "dgonzalez@wit.la",
