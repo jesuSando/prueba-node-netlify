@@ -408,7 +408,6 @@ async function handlePayment() {
             console.log("[DEBUG] Respuesta de crearPago:", data);
 
             if (data.url) {
-                console.log("[DEBUG] URL de pago:", data.url);
                 const paymentWindow = window.open(data.url, '_blank', 'width=800,height=600');
 
                 if (!paymentWindow) {
@@ -425,15 +424,17 @@ async function handlePayment() {
 
                 // Escuchar mensajes desde return.html
                 const handlePagoMensaje = async (event) => {
-                    console.log("[DEBUG] Mensaje recibido desde return.html:", event.data);
+                    console.log('Mensaje recibido:', event.data);
 
                     if (!event.data || event.data.tipo !== 'pagoCompletado') return;
 
-                    const token = event.data.token || localStorage.getItem('lastToken');
-                    console.log("[DEBUG] Token recibido para verificación:", token);
+                    const token = event.data.token;
+                    const status = event.data.status;
 
-                    window.removeEventListener('message', handlePagoMensaje);
+                    console.log('Token recibido para verificación:', token);
+                    console.log('Status recibido:', status);
 
+                    // Verificar el pago
                     const checkRes = await fetch('/.netlify/functions/consultarPago', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -441,46 +442,16 @@ async function handlePayment() {
                     });
 
                     const checkData = await checkRes.json();
-                    console.log("[DEBUG] Respuesta de consultarPago:", checkData);
+                    console.log('Respuesta de consultarPago:', checkData);
 
+                    // Manejar el resultado
                     if (checkData.status === 1) {
                         showPaymentResult($modal, true);
-                        paymentWindow.close();
+                        if (paymentWindow) paymentWindow.close();
                     } else {
-                        // Liberar asientos
-                        for (const seat of selectedSeats) {
-                            try {
-                                await $.ajax({
-                                    url: 'https://boletos.dev-wit.com/api/services/revert-seat',
-                                    method: 'PATCH',
-                                    headers: {
-                                        Authorization: jwtToken,
-                                        'Content-Type': 'application/json'
-                                    },
-                                    data: JSON.stringify({
-                                        serviceId: currentServiceId,
-                                        seatNumber: String(seat.seat)
-                                    })
-                                });
-                                $(`.seat[data-seat="${seat.seat}"]`).removeClass('selected').addClass('available');
-                            } catch {
-                                console.error(`[ERROR] Error al liberar asiento ${seat.seat}`);
-                            }
-                        }
-
-                        selectedSeats.length = 0;
-                        updateTicketDetails();
-
-                        const codigoError = checkData?.paymentData?.errorCode ?? 999;
-                        const mensajeError = obtenerMensajeErrorFlow(codigoError);
-
-                        $modal.find('.modal-body').html(`
-                            <div class="payment-error">
-                                <h4>Error en el pago</h4>
-                                <p>${mensajeError}</p>
-                                <button class="btn btn-primary btn-close-modal">Aceptar</button>
-                            </div>
-                        `);
+                        // Liberar asientos si falla
+                        await revertSeats();
+                        showPaymentResult($modal, false);
                     }
                 };
 

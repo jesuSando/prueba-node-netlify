@@ -2,22 +2,32 @@
   publish = "public"
   functions = "netlify/functions"
 
-# Sirve return.html con GET (cuando accedes directo)
-[[redirects]]
-  from = "/return.html"
-  to = "/return.html"
-  status = 200
-  method = "GET"
-
-# Sirve return.html con POST (cuando redirige Flow)
+# Redirección para POST a return.html
 [[redirects]]
   from = "/return.html"
   to = "/.netlify/functions/serveReturn"
   status = 200
-  method = "POST"
+  force = true
+  conditions = {Method = ["POST"]}
 
-# Fallback para SPA
+# Redirección para GET a return.html (archivo estático)
+[[redirects]]
+  from = "/return.html"
+  to = "/return.html"
+  status = 200
+  force = true
+  conditions = {Method = ["GET"]}
+
+# Redirección general para SPA
 [[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
+
+# Headers para CORS
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Access-Control-Allow-Origin = "*"
+    Access-Control-Allow-Methods = "GET, POST, OPTIONS"
+    Access-Control-Allow-Headers = "Content-Type, Authorization"
