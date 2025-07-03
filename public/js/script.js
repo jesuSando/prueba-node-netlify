@@ -8,7 +8,7 @@ let currentServiceId = '';
 let selectedSeats = [];
 let currentServiceData = null;
 
-let urlBase = "https://prueba-flow.netlify.app"
+let urlBase = window.location.origin; // esto lo resuelve automáticamente
 
 
 async function obtenerToken() {
@@ -321,6 +321,37 @@ function initPaymentButtons() {
     $(document).off('click', '#payWeb, #payCash').on('click', '#payWeb, #payCash', handlePayment);
 }
 
+function obtenerMensajeErrorFlow(codigo) {
+    switch (Number(codigo)) {
+        case -1:
+            return "❌ Tarjeta inválida";
+        case -2:
+            return "❌ Error de conexión con el medio de pago";
+        case -3:
+            return "❌ Excede el monto máximo permitido";
+        case -4:
+            return "❌ Fecha de expiración inválida";
+        case -5:
+            return "❌ Problema en la autenticación de la tarjeta";
+        case -6:
+            return "❌ Rechazo general de la transacción";
+        case -7:
+            return "❌ Tarjeta bloqueada";
+        case -8:
+            return "❌ Tarjeta vencida";
+        case -9:
+            return "❌ Transacción no soportada por el medio de pago";
+        case -10:
+            return "❌ Problema interno en la transacción";
+        case -11:
+            return "❌ Límite de reintentos de rechazos excedido";
+        case 999:
+            return "❌ Error desconocido en el proceso de pago";
+        default:
+            return "❌ Código de error no reconocido";
+    }
+}
+
 // Función principal de manejo de pagos
 async function handlePayment() {
 
@@ -340,14 +371,19 @@ async function handlePayment() {
     // Mostrar estado de carga
     $modal.find('.modal-body').html('<div class="loading-payment">Procesando pago...</div>');
 
+
     if (this.id === 'payWeb') {
         try {
             const amount = getTotalPrice();
             const orderId = generarIdUnico();
+
             if (isNaN(amount) || Number(amount) <= 0) {
-                console.log("es un string")
+                alert("Monto inválido para el pago");
                 return;
             }
+
+            // Mostrar estado de carga
+            $modal.find('.modal-body').html('<div class="loading-payment">Preparando pago...</div>');
 
             const res = await fetch('/.netlify/functions/crearPago', {
                 method: 'POST',
@@ -363,20 +399,97 @@ async function handlePayment() {
             const data = await res.json();
 
             if (data.url) {
-                localStorage.setItem('lastOrderId', orderId);
-                const paymentWindow = window.open(data.url, 'FlowPayment', 'width=500,height=700');
+                // Abrir en nueva pestaña en lugar de iframe
+                const paymentWindow = window.open(data.url, '_blank', 'width=800,height=600');
+
                 if (!paymentWindow) {
-                    alert('Por favor, habilita los popups para este sitio');
+                    alert("El navegador bloqueó la ventana emergente. Por favor permite ventanas emergentes para este sitio.");
+                    $modal.find('.modal-body').html(`
+                        <div class="payment-error">
+                            <p>El navegador bloqueó la ventana de pago. Por favor permite ventanas emergentes.</p>
+                            <button class="btn btn-primary" onclick="window.open('${data.url}', '_blank')">Abrir Pago</button>
+                            <button class="btn btn-secondary btn-close-modal">Cancelar</button>
+                        </div>
+                    `);
+                    return;
                 }
 
-                return;
+                // Escuchar mensajes desde return.html
+                const handlePagoMensaje = async (event) => {
+                    if (!event.data || event.data.tipo !== 'pagoCompletado') return;
+
+                    const token = event.data.token || localStorage.getItem('lastToken');
+                    window.removeEventListener('message', handlePagoMensaje);
+
+                    // Verificar estado del pago
+                    const checkRes = await fetch('/.netlify/functions/consultarPago', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ token })
+                    });
+
+                    const checkData = await checkRes.json();
+
+                    if (checkData.status === 1) {
+                        showPaymentResult($modal, true);
+                        paymentWindow.close();
+                    } else {
+                        // Liberar asientos
+                        for (const seat of selectedSeats) {
+                            try {
+                                await $.ajax({
+                                    url: 'https://boletos.dev-wit.com/api/services/revert-seat',
+                                    method: 'PATCH',
+                                    headers: {
+                                        Authorization: jwtToken,
+                                        'Content-Type': 'application/json'
+                                    },
+                                    data: JSON.stringify({
+                                        serviceId: currentServiceId,
+                                        seatNumber: String(seat.seat)
+                                    })
+                                });
+                                $(`.seat[data-seat="${seat.seat}"]`).removeClass('selected').addClass('available');
+                            } catch {
+                                console.error(`Error al liberar asiento ${seat.seat}`);
+                            }
+                        }
+
+                        selectedSeats.length = 0;
+                        updateTicketDetails();
+
+                        const codigoError = checkData?.paymentData?.errorCode ?? 999;
+                        const mensajeError = obtenerMensajeErrorFlow(codigoError);
+
+                        $modal.find('.modal-body').html(`
+                            <div class="payment-error">
+                                <h4>Error en el pago</h4>
+                                <p>${mensajeError}</p>
+                                <button class="btn btn-primary btn-close-modal">Aceptar</button>
+                            </div>
+                        `);
+                    }
+                };
+
+                window.addEventListener('message', handlePagoMensaje);
             } else {
                 alert("Error al iniciar pago con Flow");
                 console.error(data);
+                $modal.find('.modal-body').html(`
+                    <div class="payment-error">
+                        <p>Error al conectar con el sistema de pagos</p>
+                        <button class="btn btn-secondary btn-close-modal">Volver</button>
+                    </div>
+                `);
             }
         } catch (error) {
-            alert("Error al procesar pago");
-            console.error(error);
+            console.error("Error en pago web:", error);
+            $modal.find('.modal-body').html(`
+                <div class="payment-error">
+                    <p>Error al procesar el pago</p>
+                    <button class="btn btn-secondary btn-close-modal">Volver</button>
+                </div>
+            `);
         }
     }
 
@@ -434,23 +547,30 @@ window.addEventListener('DOMContentLoaded', () => {
 
 
 // Función para mostrar el resultado del pago
-function showPaymentResult($modal, originalContent, isSuccess) {
-    $modal.find('.modal-body').html(`
-        <div class="payment-${isSuccess ? 'success' : 'error'}">
-            <h4>${isSuccess ? '¡Pago exitoso!' : 'Error en el pago'}</h4>
-            <p>${isSuccess ? 'Los asientos han sido reservados correctamente.' : 'Algunos asientos no pudieron ser reservados.'}</p>
-            <button class="btn btn-primary btn-restore-payment-options btn-close-modal">Aceptar</button>
-        </div>
-    `);
-
+function showPaymentResult($modal, isSuccess) {
     if (isSuccess) {
-        resetTravelSummary();
-    }
+        $modal.find('.modal-body').html(`
+            <div class="payment-success">
+                <i class="fas fa-check-circle success-icon"></i>
+                <h3>¡Pago exitoso!</h3>
+                <p>Los asientos han sido reservados correctamente.</p>
+                <p>Recibirás un correo con los detalles de tu compra.</p>
+                <button class="btn btn-primary btn-close-modal">Aceptar</button>
+            </div>
+        `);
 
-    $(document).off('click', '.btn-restore-payment-options').on('click', '.btn-restore-payment-options', function () {
-        $modal.find('.modal-body').html(originalContent);
-        initPaymentButtons();
-    });
+        // Resetear la interfaz después de pago exitoso
+        resetTravelSummary();
+    } else {
+        $modal.find('.modal-body').html(`
+            <div class="payment-error">
+                <i class="fas fa-times-circle error-icon"></i>
+                <h3>Error en el pago</h3>
+                <p>No se pudo completar el proceso de pago.</p>
+                <button class="btn btn-secondary btn-close-modal">Volver</button>
+            </div>
+        `);
+    }
 }
 
 function resetTravelSummary() {
