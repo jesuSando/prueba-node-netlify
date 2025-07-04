@@ -32,7 +32,7 @@ export async function handler(event, context) {
                     status: status
                   }, '*');
                   
-                  setTimeout(() => window.close(), 2000);
+                  setTimeout(() => window.close(), 5000);
                 }
               } catch (e) {
                 console.error('Error en postMessage:', e);

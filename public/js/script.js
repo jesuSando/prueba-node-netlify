@@ -54,24 +54,37 @@ $('#searchForm').on('submit', function (e) {
 
     $.get(`https://boletos.dev-wit.com/api/services?origin=${origin}&destination=${destination}&date=${date}`, function (data) {
         $('#serviceList').empty();
-        if (data.length === 0) {
+
+        const now = new Date();
+        const todayString = now.toISOString().split('T')[0]; // formato yyyy-mm-dd
+
+        const serviciosValidos = data.filter(service => {
+            // Si la fecha no es hoy, se muestra el servicio sin importar la hora
+            if (service.date !== todayString) return true;
+
+            // Si es hoy, se construye un Date con la hora de salida
+            const [hour, minute] = service.departureTime.split(':').map(Number);
+            const departureDateTime = new Date(`${service.date}T${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}:00`);
+
+            return departureDateTime > now;
+        });
+
+        if (serviciosValidos.length === 0) {
             $('#serviceList').append('<li class="list-group-item"><div class="info-servicio">No hay servicios disponibles</div></li>');
             return;
         }
 
-        data.forEach(service => {
+        serviciosValidos.forEach(service => {
             $('#serviceList').append(`
-                <li class="list-group-item service-list-item" data-service-id="${service.id}"">
+                <li class="list-group-item service-list-item" data-service-id="${service.id}">
                     <div class="contenido-item">
                         <div class="contenido-servicio">
                             <div class="header-servicio">
                             ${service.company} (${service.busTypeDescription}) <strong>${service.departureTime}</strong> - <strong>${service.arrivalTime}</strong> 
-
                             </div>
                             <div class="info-servicio">
-                                    <div class="info1">
+                                <div class="info1">
                                     <strong>${service.availableSeats}</strong> Asientos Disponibles
-                                    
                                 </div>
                                 <div class="info2">
                                     <div><strong>Piso 1: </strong><br>${service.seatDescriptionFirst} - <strong>$${service.priceFirst}</strong></div>
@@ -89,6 +102,7 @@ $('#searchForm').on('submit', function (e) {
     }).fail(() => {
         $('#serviceList').empty().append('<li class="list-group-item">Error al cargar servicios</li>');
     });
+
 });
 
 
@@ -282,6 +296,7 @@ function updateTicketDetails() {
     console.log(getTotalPrice())
 }
 
+//modal--------------------------------------------------------------------------------------------------------------------------------
 
 // Mostrar modal con animación
 $(document).on('click', '#openPaymentModal', function () {
@@ -298,7 +313,22 @@ function hideModal() {
 }
 
 // Cerrar modal al hacer clic en los botones de cerrar
-$(document).on('click', '.btn-close, .btn-close-modal', hideModal);
+// Resetear completamente el modal al cerrarlo con el botón "Aceptar" luego de un pago exitoso
+$(document).on('click', '.btn-close-modal', function () {
+    hideModal();
+
+    // Restaurar contenido original del modal después de 300ms (duración del fadeOut)
+    setTimeout(() => {
+        $('#paymentModal .modal-body').html(`
+            <button id="payWeb" class="btn btn-primary">Pago Web</button>
+            <button id="payCash" class="btn btn-success">Pago en Efectivo</button>
+            <button class="btn btn-secondary btn-close-modal">Cancelar</button>
+        `);
+
+        initPaymentButtons(); // Volver a enlazar eventos de pago
+    }, 300);
+});
+
 
 // Cerrar modal al hacer clic fuera del contenido
 $('#paymentModal').on('click', function (e) {
@@ -322,34 +352,28 @@ function initPaymentButtons() {
 }
 
 function obtenerMensajeErrorFlow(codigo) {
-    switch (Number(codigo)) {
-        case -1:
-            return "❌ Tarjeta inválida";
-        case -2:
-            return "❌ Error de conexión con el medio de pago";
-        case -3:
-            return "❌ Excede el monto máximo permitido";
-        case -4:
-            return "❌ Fecha de expiración inválida";
-        case -5:
-            return "❌ Problema en la autenticación de la tarjeta";
-        case -6:
-            return "❌ Rechazo general de la transacción";
-        case -7:
-            return "❌ Tarjeta bloqueada";
-        case -8:
-            return "❌ Tarjeta vencida";
-        case -9:
-            return "❌ Transacción no soportada por el medio de pago";
-        case -10:
-            return "❌ Problema interno en la transacción";
-        case -11:
-            return "❌ Límite de reintentos de rechazos excedido";
-        case 999:
-            return "❌ Error desconocido en el proceso de pago";
-        default:
-            return "❌ Código de error no reconocido";
-    }
+    if (!codigo) return "❌ Error desconocido en el proceso de pago";
+
+    const code = Number(codigo);
+    const errores = {
+        '-1': "❌ Tarjeta inválida",
+        '-2': "❌ Error de conexión con el medio de pago",
+        '-3': "❌ Excede el monto máximo permitido",
+        '-4': "❌ Fecha de expiración inválida",
+        '-5': "❌ Problema en la autenticación de la tarjeta",
+        '-6': "❌ Rechazo general de la transacción",
+        '-7': "❌ Tarjeta bloqueada",
+        '-8': "❌ Tarjeta vencida",
+        '-9': "❌ Transacción no soportada por el medio de pago",
+        '-10': "❌ Problema interno en la transacción",
+        '-11': "❌ Límite de reintentos de rechazos excedido",
+        '999': "❌ Error desconocido en el proceso de pago",
+        'popup_blocked': "❌ El navegador bloqueó la ventana de pago. Por favor habilita popups para este sitio.",
+        'invalid_amount': "❌ Monto de pago inválido",
+        'network_error': "❌ Error de conexión. Verifica tu internet e intenta nuevamente."
+    };
+
+    return errores[code] || errores[code.toString()] || `❌ Error en el pago (Código: ${codigo})`;
 }
 
 // Función principal de manejo de pagos
@@ -422,7 +446,7 @@ async function handlePayment() {
                 if (event.data?.tipo === 'pagoCompletado') {
                     clearInterval(checkWindowClosed);
                     window.removeEventListener('message', messageHandler);
-                    handlePaymentResult(event.data.success, event.data.token);
+                    handlePaymentResult(event.data.success, event.data.status);
                 }
             };
 
@@ -444,37 +468,33 @@ async function handlePayment() {
         }
     }
     if (method === 'cash') {
-        // Lógica para pago en efectivo u otro método
-        let processed = 0;
-        selectedSeats.forEach(s => {
-            $.ajax({
-                url: `https://boletos.dev-wit.com/api/seats/${currentServiceId}/confirm`,
-                method: 'POST',
-                headers: {
-                    Authorization: jwtToken,
-                    'Content-Type': 'application/json'
-                },
-                data: JSON.stringify({
-                    seatNumber: s.seat,
-                    authCode: authCode,
-                    userId: 'usuario123'
-                }),
-                success: () => {
-                    $(`[data-seat="${s.seat}"]`).removeClass('selected').addClass('reserved').off('click');
-                    processed++;
+        const amount = getTotalPrice();
+        try {
+            if (amount <= 0) {
+                throw new Error("Monto inválido para el pago");
+            }
+            $modal.find('.modal-body').html(`
+                <div class="payment-cash-confirmation">
+                    <h4>¿Confirmar pago en efectivo?</h4>
+                    <p>Los asientos seleccionados se reservarán como pagados.</p>
+                    <div class="cash-actions mt-3">
+                        <button class="btn btn-success btn-confirm-cash">Confirmar</button>
+                        <button class="btn btn-secondary btn-cancel-payment btn-close-modal">Cancelar y Liberar Asientos</button>
+                    </div>
+                </div>
+            `);
+        } catch (error) {
+            console.error("Error en pago manual:", error);
+            $modal.find('.modal-body').html(`
+                <div class="payment-error">
+                    <h4>Error al iniciar pago</h4>
+                    <p>${error.message}</p>
+                    <button class="btn btn-secondary btn-close-modal">Volver</button>
+                </div>
+            `);
+        }
 
-                    if (processed === selectedSeats.length) {
-                        showPaymentResult($modal, originalModalContent, true);
-                    }
-                },
-                error: () => {
-                    processed++;
-                    if (processed === selectedSeats.length) {
-                        showPaymentResult($modal, originalModalContent, false);
-                    }
-                }
-            });
-        });
+
     }
 }
 
@@ -485,9 +505,46 @@ function handlePaymentWindowClosed() {
             <h4>Ventana de pago cerrada</h4>
             <p>¿Deseas intentar nuevamente?</p>
             <button class="btn btn-primary" onclick="retryPayment()">Reintentar Pago</button>
-            <button class="btn btn-secondary" onclick="revertAndClose()">Cancelar y Liberar Asientos</button>
+            <button class="btn btn-secondary btn-cancel-payment btn-close-modal">Cancelar</button>
         </div>
     `);
+}
+
+async function handlePaymentResult(success, statusCode = null) {
+    const $modal = $('#paymentModal');
+
+    if (success) {
+        try {
+            // Confirmar reserva de asientos
+            await confirmSeatReservation();
+
+            $modal.find('.modal-body').html(`
+                <div class="payment-success">
+                    <i class="fas fa-check-circle success-icon"></i>
+                    <h3>¡Pago exitoso!</h3>
+                    <p>Los asientos han sido reservados correctamente.</p>
+                    <p>Recibirás un correo con los detalles de tu compra.</p>
+                    <button class="btn btn-primary btn-close-modal">Aceptar</button>
+                </div>
+            `);
+
+            resetTravelSummary();
+            localStorage.removeItem('pendingPayment');
+        } catch (error) {
+            showPaymentError($modal, error);
+        }
+    } else {
+        const errorMessage = obtenerMensajeErrorFlow(statusCode) || "Error desconocido en el pago";
+        $modal.find('.modal-body').html(`
+            <div class="payment-error">
+                <i class="fas fa-times-circle error-icon"></i>
+                <h3>Error en el pago</h3>
+                <p>${errorMessage}</p>
+                <button class="btn btn-primary" onclick="retryPayment()">Reintentar Pago</button>
+                <button class="btn btn-secondary btn-cancel-payment btn-close-modal">Cancelar y Liberar Asientos</button>
+            </div>
+        `);
+    }
 }
 
 function retryPayment() {
@@ -501,6 +558,86 @@ async function revertAndClose() {
     await revertSeats();
     hideModal();
 }
+
+$(document).on('click', '.btn-cancel-payment', cancelPayment);
+
+
+async function cancelPayment() {
+    console.log("cancelado");
+
+    await obtenerToken();
+
+    if (!jwtToken) {
+        alert("Error al generar el token. Por favor, reinicia la página.");
+        return;
+    }
+
+    const promises = selectedSeats.map(s =>
+        $.ajax({
+            url: 'https://boletos.dev-wit.com/api/services/revert-seat',
+            method: 'PATCH',
+            headers: {
+                Authorization: jwtToken,
+                'Content-Type': 'application/json'
+            },
+            data: JSON.stringify({
+                serviceId: currentServiceId,
+                seatNumber: String(s.seat)
+            }),
+            success: () => {
+                $(`[data-seat="${s.seat}"]`).removeClass('selected').addClass('available');
+            },
+            error: () => {
+                console.error(`Error al liberar el asiento ${s.seat}`);
+            }
+        })
+    );
+
+    // Esperar que todas las solicitudes terminen
+    await Promise.all(promises);
+
+    selectedSeats = [];
+    updateTicketDetails();
+}
+
+
+
+$(document).on('click', '.btn-confirm-cash', async function () {
+    const $modal = $('#paymentModal');
+
+    let processed = 0;
+    selectedSeats.forEach(s => {
+        $.ajax({
+            url: `https://boletos.dev-wit.com/api/seats/${currentServiceId}/confirm`,
+            method: 'POST',
+            headers: {
+                Authorization: jwtToken,
+                'Content-Type': 'application/json'
+            },
+            data: JSON.stringify({
+                seatNumber: s.seat,
+                authCode: 'AUTHCASH123',
+                userId: 'usuario123'
+            }),
+            success: () => {
+                $(`[data-seat="${s.seat}"]`).removeClass('selected').addClass('reserved').off('click');
+                processed++;
+
+                if (processed === selectedSeats.length) {
+                    showPaymentResult($modal, true);
+                    localStorage.removeItem('pendingPayment');
+                }
+            },
+            error: () => {
+                processed++;
+                if (processed === selectedSeats.length) {
+                    showPaymentResult($modal, false);
+                }
+            }
+        });
+    });
+});
+
 
 window.addEventListener('DOMContentLoaded', () => {
     const urlParams = new URLSearchParams(window.location.search);
